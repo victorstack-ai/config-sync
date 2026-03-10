@@ -1,0 +1,21 @@
+{
+	"type": "object",
+	"description": "Widgets provider configuration schema",
+	"patternProperties": {
+		"^.+$": {
+			"type": "object",
+			"properties": {
+				"widget_class": {
+					"type": "string"
+				},
+				"settings": {
+					"type": "object"
+				},
+				"sidebar": {
+					"type": "string"
+				}
+			}
+		}
+	},
+	"additionalProperties": true
+}

@@ -1,0 +1,22 @@
+{
+	"type": "object",
+	"description": "Block patterns provider configuration schema",
+	"patternProperties": {
+		"^[a-z0-9_-]+$": {
+			"type": "object",
+			"properties": {
+				"title": {
+					"type": "string"
+				},
+				"content": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string"
+				}
+			},
+			"required": ["title", "content"]
+		}
+	},
+	"additionalProperties": false
+}

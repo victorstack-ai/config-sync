@@ -1,0 +1,39 @@
+{
+	"name": "syncforge/config-manager",
+	"description": "Export, import, and sync WordPress site configuration as YAML files across environments.",
+	"type": "wordpress-plugin",
+	"license": "GPL-2.0-or-later",
+	"minimum-stability": "stable",
+	"require": {
+		"php": ">=8.0",
+		"symfony/yaml": "^6.0|^7.0"
+	},
+	"require-dev": {
+		"wp-coding-standards/wpcs": "^3.0",
+		"phpunit/phpunit": "^10.0",
+		"yoast/phpunit-polyfills": "^2.0",
+		"dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+	},
+	"autoload": {
+		"psr-4": {
+			"ConfigSync\\": "src/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"ConfigSync\\Tests\\": "tests/"
+		}
+	},
+	"config": {
+		"allow-plugins": {
+			"dealerdirect/phpcodesniffer-composer-installer": true
+		}
+	},
+	"scripts": {
+		"lint": "phpcs",
+		"lint:fix": "phpcbf",
+		"test": "phpunit",
+		"test:unit": "phpunit --testsuite=unit",
+		"test:integration": "phpunit --testsuite=integration"
+	}
+}

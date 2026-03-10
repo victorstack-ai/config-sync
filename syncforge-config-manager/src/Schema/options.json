@@ -1,0 +1,10 @@
+{
+	"type": "object",
+	"description": "Options provider configuration schema",
+	"patternProperties": {
+		"^[a-z_]+$": {
+			"type": ["string", "integer", "boolean", "array", "null"]
+		}
+	},
+	"additionalProperties": true
+}

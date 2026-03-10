@@ -1,0 +1,19 @@
+{
+	"type": "object",
+	"description": "Roles provider configuration schema",
+	"patternProperties": {
+		"^[a-z_]+$": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"capabilities": {
+					"type": "object"
+				}
+			},
+			"required": ["name", "capabilities"]
+		}
+	},
+	"additionalProperties": false
+}

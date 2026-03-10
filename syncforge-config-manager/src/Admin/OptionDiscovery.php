@@ -1,0 +1,555 @@
+<?php
+/**
+ * Option auto-discovery for Config Sync.
+ *
+ * Scans the wp_options table for non-core options added by plugins and themes,
+ * allowing administrators to selectively track them without manual configuration.
+ *
+ * @package ConfigSync\Admin
+ * @since   1.1.0
+ */
+
+namespace ConfigSync\Admin;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Class OptionDiscovery
+ *
+ * Discovers non-core options in the database and provides an interface
+ * for administrators to add them to the tracked options list.
+ *
+ * @since 1.1.0
+ */
+class OptionDiscovery {
+
+	/**
+	 * Option name where user-selected discovered options are stored.
+	 *
+	 * @since 1.1.0
+	 * @var string
+	 */
+	const TRACKED_OPTION = 'config_sync_discovered_options';
+
+	/**
+	 * WordPress core and provider-handled options to exclude from discovery.
+	 *
+	 * Only contains options that are either part of WordPress core or already
+	 * handled by other Config Sync providers. Plugin-specific runtime options
+	 * are detected automatically by heuristic classification.
+	 *
+	 * @since 1.1.0
+	 * @var string[]
+	 */
+	private const CORE_PATTERNS = array(
+		// Transients and caches (WordPress internal).
+		'_transient_*',
+		'_site_transient_*',
+		'transient_*',
+		// WordPress internal prefixes.
+		'_wp_*',
+		'auto_core_*',
+		// WordPress internal single options.
+		'can_compress_scripts',
+		'cron',
+		'db_version',
+		'db_upgraded',
+		'fresh_site',
+		'initial_db_version',
+		'nonce_*',
+		'recently_edited',
+		'recently_activated',
+		'recovery_*',
+		'rewrite_rules',
+		'user_count',
+		// WordPress secret keys and salts (environment-specific, not config).
+		'auth_key',
+		'auth_salt',
+		'logged_in_key',
+		'logged_in_salt',
+		'nonce_key',
+		'nonce_salt',
+		'secure_auth_key',
+		'secure_auth_salt',
+		// Already handled by other Config Sync providers.
+		'widget_*',
+		'theme_mods_*',
+		'sidebars_widgets',
+		'nav_menu_*',
+		'user_roles',
+		// Config Sync internal.
+		'config_sync_*',
+		// WordPress core options already tracked by OptionsProvider.
+		'blogname',
+		'blogdescription',
+		'siteurl',
+		'home',
+		'admin_email',
+		'admin_email_lifespan',
+		'timezone_string',
+		'gmt_offset',
+		'date_format',
+		'time_format',
+		'start_of_week',
+		'WPLANG',
+		'posts_per_page',
+		'posts_per_rss',
+		'rss_use_excerpt',
+		'show_on_front',
+		'page_on_front',
+		'page_for_posts',
+		'blog_public',
+		'default_category',
+		'default_post_format',
+		'default_email_category',
+		'use_smilies',
+		'use_balanceTags',
+		'default_pingback_flag',
+		'default_ping_status',
+		'default_comment_status',
+		'require_name_email',
+		'comment_registration',
+		'close_comments_for_old_posts',
+		'close_comments_days_old',
+		'thread_comments',
+		'thread_comments_depth',
+		'page_comments',
+		'comments_per_page',
+		'default_comments_page',
+		'comment_order',
+		'comments_notify',
+		'moderation_notify',
+		'comment_moderation',
+		'moderation_keys',
+		'blacklist_keys',
+		'thumbnail_size_w',
+		'thumbnail_size_h',
+		'thumbnail_crop',
+		'medium_size_w',
+		'medium_size_h',
+		'medium_large_size_w',
+		'medium_large_size_h',
+		'large_size_w',
+		'large_size_h',
+		'uploads_use_yearmonth_folders',
+		'permalink_structure',
+		'category_base',
+		'tag_base',
+		// WordPress core options (environment/runtime, not config).
+		'active_plugins',
+		'uninstall_plugins',
+		'current_theme',
+		'stylesheet',
+		'template',
+		'finished_*',
+		'site_icon',
+		'wp_page_for_privacy_policy',
+		'show_comments_cookies_opt_in',
+		'comment_previously_approved',
+		'link_manager_enabled',
+		'upload_path',
+		'upload_url_path',
+		'mailserver_*',
+		'ping_sites',
+		'hack_file',
+		'blog_charset',
+		'html_type',
+		'default_role',
+		'users_can_register',
+		'embed_autourls',
+		'default_link_category',
+	);
+
+	/**
+	 * Heuristic keyword patterns that indicate runtime/state options.
+	 *
+	 * These are matched as substrings (case-insensitive) against option names.
+	 * Any option whose name contains one of these keywords is classified as
+	 * runtime state rather than configuration. This approach scales to any
+	 * plugin without needing plugin-specific exclusion lists.
+	 *
+	 * @since 1.2.0
+	 * @var string[]
+	 */
+	private const RUNTIME_KEYWORDS = array(
+		// Version and schema tracking.
+		'_version',
+		'_db_version',
+		'_ver',
+		'version_info',
+		// Installation and migration state.
+		'_installation_log',
+		'_installation_date',
+		'_install_date',
+		'_installed',
+		'_installer_completed',
+		'_migration',
+		'_migrated',
+		'_upgraded',
+		// Nonces, tokens, and session state.
+		'_nonce',
+		'_pingnonce',
+		'_session',
+		'_token_',
+		// Counts and statistics.
+		'_count',
+		'_total_rows',
+		'_total_logged',
+		// Dismissed notices and UI state.
+		'_dismissed',
+		'_notice_displayed',
+		'_upgrade_lock',
+		// Telemetry and analytics.
+		'_telemetry',
+		'_analytics',
+		// Batch processing state.
+		'_batch_',
+		'_last_run',
+		'_last_reset',
+		'_lasttime',
+		'_last_base_url',
+		// Taxonomy children caches (auto-generated by WP).
+		'_children',
+		// Site health data (diagnostic, not config).
+		'_site_health',
+	);
+
+	/**
+	 * Exact option name suffixes that indicate runtime state.
+	 *
+	 * Unlike RUNTIME_KEYWORDS which match as substrings, these only match
+	 * when an option name ends with the pattern. This prevents false
+	 * positives on options like "cache_settings" or "session_timeout".
+	 *
+	 * @since 1.2.0
+	 * @var string[]
+	 */
+	private const RUNTIME_SUFFIXES = array(
+		'_state',
+		'_rat',
+		'_pubkey',
+		'_auth',
+		'_install',
+	);
+
+	/**
+	 * Option name prefixes that indicate framework runtime state.
+	 *
+	 * These match options that start with a known framework prefix used
+	 * for runtime bookkeeping, not user configuration.
+	 *
+	 * @since 1.2.0
+	 * @var string[]
+	 */
+	private const RUNTIME_PREFIXES = array(
+		'action_scheduler_',
+		'schema-actionscheduler_',
+		'fs_',
+		'external_updates-',
+		'objectcache_',
+	);
+
+	/**
+	 * Discover non-core options in the database.
+	 *
+	 * Queries all autoloaded and non-autoloaded options, filters out
+	 * WordPress core options, transients, and options already handled
+	 * by other providers.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param bool $include_values Whether to include option values in the result.
+	 * @return array<string, array{name: string, value?: mixed, autoload: string, tracked: bool}>
+	 */
+	public function discover( bool $include_values = false ): array {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$all_options = $wpdb->get_results(
+			"SELECT option_name, option_value, autoload FROM {$wpdb->options}
+			WHERE option_name NOT LIKE '\_%'
+			ORDER BY option_name ASC",
+			ARRAY_A
+		);
+
+		if ( empty( $all_options ) ) {
+			return array();
+		}
+
+		// Also get options starting with underscore that aren't transients.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$underscore_options = $wpdb->get_results(
+			"SELECT option_name, option_value, autoload FROM {$wpdb->options}
+			WHERE option_name LIKE '\_%'
+			AND option_name NOT LIKE '\_transient\_%'
+			AND option_name NOT LIKE '\_site\_transient\_%'
+			AND option_name NOT LIKE '\_wp\_%'
+			ORDER BY option_name ASC",
+			ARRAY_A
+		);
+
+		if ( ! empty( $underscore_options ) ) {
+			$all_options = array_merge( $all_options, $underscore_options );
+		}
+
+		/**
+		 * Filters the core option patterns excluded from discovery.
+		 *
+		 * @since 1.1.0
+		 *
+		 * @param string[] $patterns Core option name patterns.
+		 */
+		$core_patterns = apply_filters( 'config_sync_discovery_core_patterns', self::CORE_PATTERNS );
+
+		/**
+		 * Filters the runtime keyword patterns used for heuristic classification.
+		 *
+		 * These substrings, when found in an option name, classify it as
+		 * runtime state rather than configuration. Add keywords to exclude
+		 * more runtime options, or remove them to include options that were
+		 * incorrectly classified.
+		 *
+		 * @since 1.2.0
+		 *
+		 * @param string[] $keywords Runtime keyword substrings.
+		 */
+		$runtime_keywords = apply_filters( 'config_sync_discovery_runtime_keywords', self::RUNTIME_KEYWORDS );
+
+		/**
+		 * Filters the runtime suffix patterns used for heuristic classification.
+		 *
+		 * @since 1.2.0
+		 *
+		 * @param string[] $suffixes Runtime option name suffixes.
+		 */
+		$runtime_suffixes = apply_filters( 'config_sync_discovery_runtime_suffixes', self::RUNTIME_SUFFIXES );
+
+		/**
+		 * Filters the runtime prefix patterns used for heuristic classification.
+		 *
+		 * @since 1.2.0
+		 *
+		 * @param string[] $prefixes Runtime framework prefixes.
+		 */
+		$runtime_prefixes = apply_filters( 'config_sync_discovery_runtime_prefixes', self::RUNTIME_PREFIXES );
+
+		$tracked  = self::get_tracked_options();
+		$excluded = $this->get_user_excluded_options();
+		$result   = array();
+
+		foreach ( $all_options as $row ) {
+			$name = $row['option_name'];
+
+			if ( $this->matches_any_pattern( $name, $core_patterns ) ) {
+				continue;
+			}
+
+			if ( $this->matches_any_pattern( $name, $excluded ) ) {
+				continue;
+			}
+
+			if ( $this->is_runtime_option( $name, $runtime_keywords, $runtime_suffixes, $runtime_prefixes ) ) {
+				continue;
+			}
+
+			$item = array(
+				'name'     => $name,
+				'autoload' => $row['autoload'],
+				'tracked'  => in_array( $name, $tracked, true ),
+			);
+
+			if ( $include_values ) {
+				$item['value'] = maybe_unserialize( $row['option_value'] );
+			}
+
+			$result[ $name ] = $item;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Get the list of user-selected tracked options from discovery.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @return string[]
+	 */
+	public static function get_tracked_options(): array {
+		$tracked = get_option( self::TRACKED_OPTION, array() );
+
+		if ( ! is_array( $tracked ) ) {
+			return array();
+		}
+
+		return array_values( array_filter( array_map( 'sanitize_text_field', $tracked ) ) );
+	}
+
+	/**
+	 * Save the list of tracked discovered options.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param string[] $option_names Option names to track.
+	 * @return bool True on success.
+	 */
+	public function save_tracked_options( array $option_names ): bool {
+		$sanitized = array_values(
+			array_unique(
+				array_filter(
+					array_map( 'sanitize_text_field', $option_names )
+				)
+			)
+		);
+
+		return update_option( self::TRACKED_OPTION, $sanitized );
+	}
+
+	/**
+	 * Add a single option to the tracked list.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param string $option_name Option name to add.
+	 * @return bool True on success.
+	 */
+	public function track_option( string $option_name ): bool {
+		$tracked   = self::get_tracked_options();
+		$sanitized = sanitize_text_field( $option_name );
+
+		if ( in_array( $sanitized, $tracked, true ) ) {
+			return true;
+		}
+
+		$tracked[] = $sanitized;
+
+		return update_option( self::TRACKED_OPTION, $tracked );
+	}
+
+	/**
+	 * Remove a single option from the tracked list.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param string $option_name Option name to remove.
+	 * @return bool True on success.
+	 */
+	public function untrack_option( string $option_name ): bool {
+		$tracked   = self::get_tracked_options();
+		$sanitized = sanitize_text_field( $option_name );
+		$filtered  = array_values( array_filter(
+			$tracked,
+			static function ( $name ) use ( $sanitized ) {
+				return $name !== $sanitized;
+			}
+		) );
+
+		return update_option( self::TRACKED_OPTION, $filtered );
+	}
+
+	/**
+	 * Get user-excluded option patterns from settings.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @return string[]
+	 */
+	private function get_user_excluded_options(): array {
+		$settings = get_option( SettingsPage::OPTION_NAME, SettingsPage::get_defaults() );
+		$excluded = $settings['excluded_options'] ?? '';
+
+		if ( empty( $excluded ) ) {
+			return array();
+		}
+
+		return array_values(
+			array_filter(
+				array_map( 'trim', explode( "\n", $excluded ) )
+			)
+		);
+	}
+
+	/**
+	 * Classify an option as runtime state using heuristic keyword detection.
+	 *
+	 * Instead of maintaining plugin-specific exclusion lists, this method
+	 * checks option names against generic keyword patterns that indicate
+	 * runtime state (versions, counts, nonces, caches, etc.). This scales
+	 * to any plugin combination without hardcoding.
+	 *
+	 * Options containing "settings", "options", "config", or "key" (API keys)
+	 * in their name are never classified as runtime, even if they also match
+	 * a runtime keyword - these are almost always user configuration.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @param string   $name     The option name to check.
+	 * @param string[] $keywords Substring patterns indicating runtime state.
+	 * @param string[] $suffixes Suffix patterns indicating runtime state.
+	 * @param string[] $prefixes Prefix patterns indicating runtime state.
+	 * @return bool True if the option is classified as runtime state.
+	 */
+	private function is_runtime_option( string $name, array $keywords, array $suffixes, array $prefixes ): bool {
+		$name_lower = strtolower( $name );
+
+		// Normalize hyphens to underscores so keywords match both separators.
+		// e.g. "acf-image-aspect-ratio-crop-version" matches "_version".
+		$name_normalized = str_replace( '-', '_', $name_lower );
+
+		// Config-indicating words override runtime classification.
+		// If the name contains these, it is almost certainly user config.
+		$config_indicators = array( 'settings', 'options', 'config', '_key', '_api_key' );
+		foreach ( $config_indicators as $indicator ) {
+			if ( false !== strpos( $name_normalized, $indicator ) ) {
+				return false;
+			}
+		}
+
+		// Check runtime prefixes (framework bookkeeping).
+		foreach ( $prefixes as $prefix ) {
+			$prefix_normalized = str_replace( '-', '_', strtolower( $prefix ) );
+			if ( 0 === strpos( $name_normalized, $prefix_normalized ) ) {
+				return true;
+			}
+		}
+
+		// Check runtime keyword substrings.
+		foreach ( $keywords as $keyword ) {
+			$keyword_normalized = str_replace( '-', '_', strtolower( $keyword ) );
+			if ( false !== strpos( $name_normalized, $keyword_normalized ) ) {
+				return true;
+			}
+		}
+
+		// Check runtime suffixes.
+		foreach ( $suffixes as $suffix ) {
+			$suffix_normalized = str_replace( '-', '_', strtolower( $suffix ) );
+			if ( substr( $name_normalized, -strlen( $suffix_normalized ) ) === $suffix_normalized ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if a name matches any pattern in a list.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param string   $name     The option name to check.
+	 * @param string[] $patterns Patterns with optional wildcard (*) characters.
+	 * @return bool True if any pattern matches.
+	 */
+	private function matches_any_pattern( string $name, array $patterns ): bool {
+		foreach ( $patterns as $pattern ) {
+			if ( fnmatch( $pattern, $name ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+}

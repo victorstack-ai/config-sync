@@ -1,0 +1,28 @@
+{
+	"type": "object",
+	"description": "Menus provider configuration schema",
+	"properties": {
+		"_locations": {
+			"type": "object",
+			"description": "Menu location to menu slug mapping"
+		}
+	},
+	"patternProperties": {
+		"^(?!_locations$).+$": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"items": {
+					"type": "array"
+				}
+			},
+			"required": ["name"]
+		}
+	},
+	"additionalProperties": true
+}

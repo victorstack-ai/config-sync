@@ -1,0 +1,17 @@
+{
+	"type": "object",
+	"description": "Rewrite rules provider configuration schema",
+	"properties": {
+		"permalink_structure": {
+			"type": "string"
+		},
+		"category_base": {
+			"type": "string"
+		},
+		"tag_base": {
+			"type": "string"
+		}
+	},
+	"required": ["permalink_structure"],
+	"additionalProperties": true
+}

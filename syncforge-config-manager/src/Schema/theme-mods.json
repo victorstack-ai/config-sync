@@ -1,0 +1,10 @@
+{
+	"type": "object",
+	"description": "Theme mods provider configuration schema",
+	"patternProperties": {
+		"^.+$": {
+			"type": ["string", "integer", "boolean", "array", "null"]
+		}
+	},
+	"additionalProperties": true
+}

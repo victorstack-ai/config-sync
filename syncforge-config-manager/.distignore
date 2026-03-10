@@ -1,0 +1,13 @@
+# Files to exclude from WordPress.org plugin distribution
+.distignore
+.editorconfig
+.gitignore
+.phpcs.xml
+phpcs.xml.dist
+phpunit.xml.dist
+tests/
+.github/
+.claude/
+node_modules/
+composer.json
+composer.lock
